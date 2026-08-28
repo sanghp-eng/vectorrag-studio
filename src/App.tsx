@@ -22,11 +22,11 @@ function MainApp() {
   const [isLoadingData, setIsLoadingData] = useState(false);
 
   const [settings, setSettings] = useState<RAGSettings>({
-    topK: 4,
-    similarityThreshold: 0.35,
+    topK: 6,
+    similarityThreshold: 0.25,
     strictGrounding: true,
     model: 'gemini-3.7-flash',
-    temperature: 0.3,
+    temperature: 0.2,
     chunkingStrategy: 'paragraph',
     chunkSize: 350,
     chunkOverlap: 50,

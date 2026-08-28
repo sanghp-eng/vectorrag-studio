@@ -23,6 +23,7 @@ import {
   addDocument,
   getUserDocuments,
   getUserChunks,
+  getUserChunksWithPCA,
   deleteDocument,
   searchVectorStore,
   getAiClient,
@@ -373,14 +374,8 @@ async function startServer() {
         success: true,
         query: query.trim(),
         answer: result.answer,
-        citations: result.citations,
-        metrics: {
-          retrievalLatencyMs: result.retrievalLatencyMs,
-          generationLatencyMs: result.generationLatencyMs,
-          topSimilarity: result.topSimilarity,
-          chunksRetrieved: result.relevantChunks.length,
-          modelUsed: result.modelUsed,
-        },
+        citations: result.sources,
+        metrics: result.metrics,
       });
     } catch (err: any) {
       console.error('v1 Chat error:', err);
@@ -613,26 +608,13 @@ Nhiệm vụ: Trích xuất và nhận dạng quang học TOÀN BỘ nội dung 
     }
   });
 
-  // Get user chunks
+  // Get user chunks with 2D PCA coordinates
   app.get('/api/kb/chunks', authMiddleware, (req: AuthenticatedRequest, res) => {
     try {
       const userId = req.user!.id;
       const documentId = req.query.documentId as string | undefined;
-      const chunks = getUserChunks(userId, documentId);
-      // Return chunks with embedding dimensions without sending full float arrays to save bandwidth
-      const lightChunks = chunks.map(c => ({
-        id: c.id,
-        documentId: c.documentId,
-        documentTitle: c.documentTitle,
-        category: c.category,
-        chunkIndex: c.chunkIndex,
-        content: c.content,
-        tokenCount: c.tokenCount,
-        characterCount: c.characterCount,
-        embeddingDim: c.embedding.length,
-        createdAt: c.createdAt,
-      }));
-      res.json({ chunks: lightChunks, total: lightChunks.length });
+      const chunks = getUserChunksWithPCA(userId, documentId);
+      res.json({ chunks, total: chunks.length });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }

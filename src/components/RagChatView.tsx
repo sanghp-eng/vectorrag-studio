@@ -63,10 +63,10 @@ Bạn có thể thử đặt câu hỏi về các tài liệu kiến thức có 
   }, [messages, isLoading]);
 
   const sampleQuestions = [
+    'Quy trình xử lý sự cố máy chủ và cảnh báo Zabbix (Disk, CPU/OOM, MySQL, 502)?',
     'Quy trình 3 bước hoạt động của hệ thống RAG là gì?',
-    'Tiêu chuẩn bảo mật ISO 27001 cho vector DB yêu cầu gì?',
-    'Kích thước chunk và overlap tối ưu là bao nhiêu?',
-    'Lợi ích của cơ sở dữ liệu vector so với tìm kiếm từ khóa truyền thống?',
+    'Tiêu chuẩn bảo mật ISO 27001 và Zero Trust cho Vector DB?',
+    'Kích thước chunk và overlap tối ưu trong kỹ thuật Chunking?',
   ];
 
   const handleSendMessage = async (queryText?: string) => {
@@ -93,8 +93,8 @@ Bạn có thể thử đặt câu hỏi về các tài liệu kiến thức có 
         },
         body: JSON.stringify({
           query: textToSend.trim(),
-          topK: settings.topK,
-          similarityThreshold: settings.similarityThreshold,
+          topK: settings.topK || 6,
+          similarityThreshold: settings.similarityThreshold || 0.22,
           strictGrounding: settings.strictGrounding,
           temperature: settings.temperature,
         }),
@@ -157,7 +157,7 @@ Bạn có thể thử đặt câu hỏi về các tài liệu kiến thức có 
                     s =>
                       `- [${s.index}] ${s.documentTitle} (Đoạn ${s.chunkIndex}, Tương đồng: ${Math.round(
                         s.similarity * 100
-                      )}%)\n  > ${s.preview}`
+                      )}%)\n  > ${s.fullContent || s.preview}`
                   )
                   .join('\n')}\n\n`
               : ''
@@ -175,15 +175,16 @@ Bạn có thể thử đặt câu hỏi về các tài liệu kiến thức có 
   };
 
   const inspectSource = (src: CitationSource) => {
+    const fullText = src.fullContent || src.preview;
     setSelectedChunk({
       id: src.chunkId,
       documentId: src.documentId,
       documentTitle: src.documentTitle,
       category: src.category,
       chunkIndex: src.chunkIndex,
-      content: src.preview,
-      tokenCount: Math.ceil(src.preview.split(/\s+/).length * 1.3),
-      characterCount: src.preview.length,
+      content: fullText,
+      tokenCount: Math.ceil(fullText.split(/\s+/).length * 1.3),
+      characterCount: fullText.length,
       createdAt: new Date().toISOString(),
     });
     setSelectedSimilarity(src.similarity);

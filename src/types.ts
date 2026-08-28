@@ -67,6 +67,7 @@ export interface CitationSource {
   chunkIndex: number;
   similarity: number;
   preview: string;
+  fullContent?: string;
   category: string;
 }
 

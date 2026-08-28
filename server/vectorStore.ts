@@ -197,6 +197,36 @@ export function computeRawCosine(a: number[], b: number[]): number {
   return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
 }
 
+// Compute keyword and lexical relevance score (BM25-style lexical matching)
+export function computeKeywordScore(query: string, text: string, title = ''): number {
+  const normQuery = query.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  const normText = (title + ' ' + text).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  
+  const queryWords = normQuery.split(/[\s,.;:!?()\[\]{}"'`<>\/\\_-]+/).filter(w => w.length >= 2);
+  if (queryWords.length === 0) return 0;
+
+  let matchedWords = 0;
+  let exactMatchBonus = 0;
+
+  // Check exact phrase match
+  if (normText.includes(normQuery) && normQuery.length > 5) {
+    exactMatchBonus = 0.35;
+  }
+
+  for (const word of queryWords) {
+    if (normText.includes(word)) {
+      matchedWords++;
+      // Extra weight if found in document title
+      if (title.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').includes(word)) {
+        matchedWords += 0.5;
+      }
+    }
+  }
+
+  const wordRatio = Math.min(1, matchedWords / queryWords.length);
+  return Math.min(1, wordRatio * 0.7 + exactMatchBonus);
+}
+
 // Text Chunking
 export function splitTextIntoChunks(
   text: string,
@@ -419,6 +449,30 @@ export function getUserChunks(userId: string, documentId?: string): StoredChunk[
   return storedChunks.filter(c => c.userId === userId && (!documentId || c.documentId === documentId));
 }
 
+export function getUserChunksWithPCA(userId: string, documentId?: string): (Omit<StoredChunk, 'embedding'> & { embeddingDim: number; pcaCoords: [number, number] })[] {
+  const userChunks = storedChunks.filter(c => c.userId === userId && (!documentId || c.documentId === documentId));
+  if (userChunks.length === 0) return [];
+  
+  // Compute PCA across all user chunks
+  const vectors = userChunks.map(c => c.embedding);
+  const coords = computePCA2D(vectors);
+
+  return userChunks.map((c, i) => ({
+    id: c.id,
+    userId: c.userId,
+    documentId: c.documentId,
+    documentTitle: c.documentTitle,
+    category: c.category,
+    chunkIndex: c.chunkIndex,
+    content: c.content,
+    tokenCount: c.tokenCount,
+    characterCount: c.characterCount,
+    embeddingDim: c.embedding.length,
+    pcaCoords: coords[i] || [0, 0],
+    createdAt: c.createdAt,
+  }));
+}
+
 export function deleteDocument(userId: string, documentId: string): boolean {
   const initialDocCount = storedDocuments.length;
   storedDocuments = storedDocuments.filter(d => !(d.userId === userId && d.id === documentId));
@@ -433,8 +487,8 @@ export function deleteDocument(userId: string, documentId: string): boolean {
 export async function searchVectorStore(
   userId: string,
   query: string,
-  topK = 4,
-  similarityThreshold = 0.35,
+  topK = 5,
+  similarityThreshold = 0.25,
   categoryFilter?: string,
   documentIds?: string[],
   customApiKey?: string
@@ -464,16 +518,22 @@ export async function searchVectorStore(
   const { embedding: queryEmbedding, model: modelUsed } = await getEmbedding(query, customApiKey);
 
   const scored = userChunks.map(chunk => {
-    // Cosine similarity
+    // 1. Semantic Cosine similarity (normalized to 0..1)
     const rawSim = computeRawCosine(queryEmbedding, chunk.embedding);
-    // Normalize to 0..1 scale
-    const similarity = Math.max(0, (rawSim + 1) / 2);
-    return { chunk, similarity };
+    const semanticSim = Math.max(0, (rawSim + 1) / 2);
+
+    // 2. Lexical Keyword & BM25-style overlap score
+    const keywordSim = computeKeywordScore(query, chunk.content, chunk.documentTitle);
+
+    // 3. Hybrid Combined Score (70% Semantic Vector + 30% Keyword Matching with exact bonus)
+    const combinedScore = Math.min(1, semanticSim * 0.70 + keywordSim * 0.30);
+
+    return { chunk, similarity: combinedScore, rawSemantic: semanticSim, keywordScore: keywordSim };
   });
 
   // Filter by threshold and sort descending
   const filtered = scored
-    .filter(item => item.similarity >= similarityThreshold)
+    .filter(item => item.similarity >= similarityThreshold || item.keywordScore >= 0.45)
     .sort((a, b) => b.similarity - a.similarity)
     .slice(0, topK);
 
@@ -492,7 +552,8 @@ export async function searchVectorStore(
   }
 
   const enrichedResults = finalResults.map(item => ({
-    ...item,
+    chunk: item.chunk,
+    similarity: item.similarity,
     pcaCoords: chunkPcaMap.get(item.chunk.id) || [0, 0],
   }));
 
@@ -503,4 +564,40 @@ export async function searchVectorStore(
     modelUsed,
     totalChunksSearched: userChunks.length,
   };
+}
+
+// Expand context for retrieved chunks by including surrounding chunks from same documents
+export function getExpandedContextChunks(userId: string, topChunks: StoredChunk[]): StoredChunk[] {
+  if (topChunks.length === 0) return [];
+  const chunkIdSet = new Set<string>(topChunks.map(c => c.id));
+  const expanded: StoredChunk[] = [...topChunks];
+
+  // Group top chunks by documentId
+  const docChunkIndices = new Map<string, number[]>();
+  topChunks.forEach(c => {
+    const list = docChunkIndices.get(c.documentId) || [];
+    list.push(c.chunkIndex);
+    docChunkIndices.set(c.documentId, list);
+  });
+
+  // For each document with matches, check if there are adjacent chunks that bridge continuity
+  const userChunks = storedChunks.filter(c => c.userId === userId);
+  userChunks.forEach(candidate => {
+    if (chunkIdSet.has(candidate.id)) return;
+    const indices = docChunkIndices.get(candidate.documentId);
+    if (indices) {
+      // If candidate is directly adjacent (+1 or -1) to any matched chunk in the same document
+      const isAdjacent = indices.some(idx => Math.abs(idx - candidate.chunkIndex) === 1);
+      if (isAdjacent && expanded.length < topChunks.length + 3) {
+        chunkIdSet.add(candidate.id);
+        expanded.push(candidate);
+      }
+    }
+  });
+
+  // Sort expanded chunks logically by document and chunkIndex
+  return expanded.sort((a, b) => {
+    if (a.documentId !== b.documentId) return a.documentTitle.localeCompare(b.documentTitle);
+    return a.chunkIndex - b.chunkIndex;
+  });
 }
