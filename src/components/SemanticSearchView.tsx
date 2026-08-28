@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Search,
   Sliders,
@@ -13,9 +13,10 @@ import {
   Eye,
   Tag,
   Hash,
+  Folder,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
-import { DocumentChunk, SearchResponse, SearchResultItem } from '../types';
+import { DocumentChunk, SearchResponse, SearchResultItem, KBCategory } from '../types';
 import { ChunkInspectorModal } from './ChunkInspectorModal';
 
 interface SemanticSearchViewProps {
@@ -32,11 +33,23 @@ export const SemanticSearchView: React.FC<SemanticSearchViewProps> = ({
   const [topK, setTopK] = useState(5);
   const [similarityThreshold, setSimilarityThreshold] = useState(0.3);
   const [categoryFilter, setCategoryFilter] = useState('');
+  const [categoriesList, setCategoriesList] = useState<KBCategory[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [searchResponse, setSearchResponse] = useState<SearchResponse | null>(null);
   const [selectedChunk, setSelectedChunk] = useState<DocumentChunk | null>(null);
   const [selectedSimilarity, setSelectedSimilarity] = useState<number | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch('/api/kb/categories', { headers: authHeader })
+      .then(res => res.json())
+      .then(data => {
+        if (data.categories) {
+          setCategoriesList(data.categories);
+        }
+      })
+      .catch(err => console.error('Error fetching categories in semantic search:', err));
+  }, [authHeader]);
 
   const sampleQueries = [
     'Quy trình Ingestion và Chunking',
@@ -201,12 +214,12 @@ export const SemanticSearchView: React.FC<SemanticSearchViewProps> = ({
               onChange={e => setCategoryFilter(e.target.value)}
               className="w-full bg-[#F8F7F4] border border-[#141414] p-1.5 text-[#141414] text-xs font-mono focus:outline-none"
             >
-              <option value="">ALL_CATEGORIES</option>
-              <option value="Chuyên ngành AI">Chuyên ngành AI & RAG</option>
-              <option value="Bảo mật & Pháp lý">Bảo mật & Pháp lý</option>
-              <option value="Tài liệu Sản phẩm">Tài liệu Sản phẩm</option>
-              <option value="Chính sách Công ty">Chính sách Công ty</option>
-              <option value="Kỹ thuật & Kiến trúc">Kỹ thuật & Kiến trúc</option>
+              <option value="">TẤT CẢ DANH MỤC (ALL)</option>
+              {categoriesList.map(cat => (
+                <option key={cat.id} value={cat.name}>
+                  {cat.name} {cat.documentCount ? `(${cat.documentCount})` : ''}
+                </option>
+              ))}
             </select>
           </div>
         </div>

@@ -21,9 +21,14 @@ import {
   Zap,
   Activity,
   FileCode,
+  Shield,
+  CheckCircle,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { ExternalApiKey } from '../types';
+import { copyToClipboard } from '../utils/clipboard';
 
 interface ApiHubViewProps {
   documentCount: number;
@@ -33,12 +38,13 @@ interface ApiHubViewProps {
 type CodeTab = 'zabbix' | 'curl' | 'python' | 'nodejs' | 'langchain';
 
 export const ApiHubView: React.FC<ApiHubViewProps> = ({ documentCount, chunkCount }) => {
-  const { authHeader, isAuthenticated } = useAuth();
+  const { authHeader, isAuthenticated, token, user } = useAuth();
 
   // Keys management state
   const [keys, setKeys] = useState<ExternalApiKey[]>([]);
   const [isLoadingKeys, setIsLoadingKeys] = useState(false);
   const [keyError, setKeyError] = useState<string | null>(null);
+  const [revealedKeyIds, setRevealedKeyIds] = useState<Record<string, boolean>>({});
 
   // New Key creation form state
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -58,6 +64,10 @@ export const ApiHubView: React.FC<ApiHubViewProps> = ({ documentCount, chunkCoun
   // Code Tab selection
   const [activeCodeTab, setActiveCodeTab] = useState<CodeTab>('zabbix');
   const [selectedKeyForSnippet, setSelectedKeyForSnippet] = useState<string>('');
+
+  const toggleRevealKey = (id: string) => {
+    setRevealedKeyIds(prev => ({ ...prev, [id]: !prev[id] }));
+  };
 
   // Target Host configuration for local & on-premise execution
   const [hostMode, setHostMode] = useState<'localhost' | 'loopback' | 'custom' | 'browser'>(() => {
@@ -124,7 +134,7 @@ export const ApiHubView: React.FC<ApiHubViewProps> = ({ documentCount, chunkCoun
       if (res.ok) {
         setKeys(data.keys || []);
         if (data.keys && data.keys.length > 0 && !selectedKeyForSnippet) {
-          setSelectedKeyForSnippet(data.keys[0].keyPrefix);
+          setSelectedKeyForSnippet(data.keys[0].id);
         }
       } else {
         setKeyError(data.error || 'Không thể tải danh sách API Key');
@@ -210,11 +220,14 @@ export const ApiHubView: React.FC<ApiHubViewProps> = ({ documentCount, chunkCoun
     }
   };
 
-  // Handle copy text
-  const handleCopy = (text: string, id: string) => {
-    navigator.clipboard.writeText(text);
-    setCopiedKeyId(id);
-    setTimeout(() => setCopiedKeyId(null), 2000);
+  // Handle copy text with robust clipboard fallback
+  const handleCopy = async (text: string, id: string) => {
+    if (!text && text !== '') return;
+    const success = await copyToClipboard(text);
+    if (success) {
+      setCopiedKeyId(id);
+      setTimeout(() => setCopiedKeyId(null), 2200);
+    }
   };
 
   // Execute Live API Sandbox Test
@@ -257,7 +270,9 @@ export const ApiHubView: React.FC<ApiHubViewProps> = ({ documentCount, chunkCoun
     }
   };
 
-  const displayKey = newlyCreatedSecret || (keys.length > 0 ? keys[0].keyPrefix : 'rag_sk_live_YOUR_API_KEY_HERE');
+  const selectedKeyObj = keys.find(k => k.id === selectedKeyForSnippet) || (keys.length > 0 ? keys[0] : null);
+  const activeRealKey = newlyCreatedSecret || (selectedKeyObj ? (selectedKeyObj.rawKey || selectedKeyObj.keyPrefix) : (keys.length > 0 ? (keys[0].rawKey || keys[0].keyPrefix) : 'rag_sk_live_YOUR_API_KEY_HERE'));
+  const displayKey = activeRealKey;
 
   // Code snippets generator
   const getSnippet = (tab: CodeTab): string => {
@@ -474,7 +489,7 @@ def search_internal_rag_knowledgebase(query: str) -> str:
 
       {/* Secret Key Alert Box when newly created */}
       {newlyCreatedSecret && (
-        <div className="border-2 border-emerald-600 bg-emerald-50 p-4 relative text-[#141414]">
+        <div className="border-2 border-emerald-600 bg-emerald-50 p-4 relative text-[#141414] shadow-sm">
           <div className="flex items-start gap-3">
             <CheckCircle2 className="w-5 h-5 text-emerald-600 flex-shrink-0 mt-0.5" />
             <div className="flex-1">
@@ -482,26 +497,38 @@ def search_internal_rag_knowledgebase(query: str) -> str:
                 API KEY ĐÃ ĐƯỢC TẠO THÀNH CÔNG! HÃY SAO CHÉP NGAY BÂY GIỜ
               </h3>
               <p className="text-[11px] text-emerald-800 mt-0.5">
-                Vì lý do bảo mật, bạn sẽ không thể xem lại toàn bộ mã khóa này sau khi đóng thông báo.
+                Vì lý do an toàn bảo mật, toàn bộ secret key này chỉ hiển thị 1 lần duy nhất tại đây.
               </p>
 
-              <div className="mt-2.5 flex items-center gap-2">
+              <div className="mt-2.5 flex flex-wrap items-center gap-2">
                 <input
                   type="text"
                   readOnly
                   value={newlyCreatedSecret}
-                  className="flex-1 bg-white border border-emerald-600 px-3 py-1.5 text-xs font-mono font-bold text-[#141414] select-all"
+                  className="flex-1 min-w-[280px] bg-white border border-emerald-600 px-3 py-1.5 text-xs font-mono font-bold text-[#141414] select-all focus:outline-none"
                 />
                 <button
+                  type="button"
                   onClick={() => handleCopy(newlyCreatedSecret, 'new-secret')}
-                  className="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-mono font-bold flex items-center gap-1"
+                  className="px-3.5 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-mono font-bold flex items-center gap-1.5 transition-all shadow-sm"
+                  title="Sao chép toàn bộ Secret Key"
                 >
-                  {copiedKeyId === 'new-secret' ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                  <span>{copiedKeyId === 'new-secret' ? 'ĐÃ COPY' : 'COPY KEY'}</span>
+                  {copiedKeyId === 'new-secret' ? <Check className="w-3.5 h-3.5 text-emerald-200" /> : <Copy className="w-3.5 h-3.5" />}
+                  <span>{copiedKeyId === 'new-secret' ? 'ĐÃ SAO CHÉP SECRET' : 'COPY RAW KEY'}</span>
                 </button>
                 <button
+                  type="button"
+                  onClick={() => handleCopy(`X-API-Key: ${newlyCreatedSecret}`, 'new-secret-header')}
+                  className="px-3 py-1.5 bg-emerald-100 hover:bg-emerald-200 border border-emerald-700 text-emerald-900 text-xs font-mono font-bold flex items-center gap-1"
+                  title="Sao chép dạng Header HTTP"
+                >
+                  {copiedKeyId === 'new-secret-header' ? <Check className="w-3.5 h-3.5 text-emerald-700" /> : <Copy className="w-3.5 h-3.5" />}
+                  <span>{copiedKeyId === 'new-secret-header' ? 'ĐÃ COPY HEADER' : 'COPY HEADER'}</span>
+                </button>
+                <button
+                  type="button"
                   onClick={() => setNewlyCreatedSecret(null)}
-                  className="px-2.5 py-1.5 border border-emerald-700 text-emerald-800 hover:bg-emerald-100 text-xs font-mono font-bold"
+                  className="px-2.5 py-1.5 border border-emerald-700 text-emerald-800 hover:bg-emerald-100 text-xs font-mono font-bold ml-auto"
                 >
                   Đóng
                 </button>
@@ -513,7 +540,7 @@ def search_internal_rag_knowledgebase(query: str) -> str:
 
       {/* Main Grid: Keys Manager & Interactive Sandbox */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        {/* Left Column: API Keys Table (5 cols) */}
+        {/* Left Column: API Keys Table & Auth Token (5 cols) */}
         <div className="lg:col-span-5 space-y-4">
           <div className="border border-[#141414] bg-white">
             <div className="p-3 bg-[#F8F7F4] border-b border-[#141414] flex items-center justify-between">
@@ -561,60 +588,91 @@ def search_internal_rag_knowledgebase(query: str) -> str:
                   </button>
                 </div>
               ) : (
-                keys.map(k => (
-                  <div
-                    key={k.id}
-                    className={`p-3 transition-colors ${
-                      k.isActive ? 'hover:bg-[#FDFDFD]' : 'bg-[#F9F9F8] opacity-65'
-                    }`}
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
-                          <span className="font-mono font-bold text-xs text-[#141414] truncate">{k.name}</span>
-                          <span
-                            className={`px-1.5 py-0.2 text-[9px] font-mono uppercase font-bold border ${
-                              k.isActive
-                                ? 'bg-green-50 border-green-600 text-green-800'
-                                : 'bg-gray-100 border-gray-400 text-gray-600'
-                            }`}
-                          >
-                            {k.isActive ? 'Active' : 'Disabled'}
-                          </span>
-                        </div>
+                keys.map(k => {
+                  const isRevealed = !!revealedKeyIds[k.id];
+                  const realKey = k.rawKey || k.keyPrefix;
+                  const displayStr = isRevealed ? realKey : k.keyPrefix;
+                  return (
+                    <div
+                      key={k.id}
+                      className={`p-3 transition-colors ${
+                        k.isActive ? 'hover:bg-[#FDFDFD]' : 'bg-[#F9F9F8] opacity-65'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="font-mono font-bold text-xs text-[#141414] truncate">{k.name}</span>
+                            <span
+                              className={`px-1.5 py-0.2 text-[9px] font-mono uppercase font-bold border ${
+                                k.isActive
+                                  ? 'bg-green-50 border-green-600 text-green-800'
+                                  : 'bg-gray-100 border-gray-400 text-gray-600'
+                              }`}
+                            >
+                              {k.isActive ? 'Active' : 'Disabled'}
+                            </span>
+                          </div>
 
-                        <div className="mt-1 flex items-center gap-2">
-                          <code className="text-[11px] font-mono bg-[#E4E3E0] px-1.5 py-0.5 text-[#141414] border border-[#141414]/20 select-all">
-                            {k.keyPrefix}
-                          </code>
-                          <button
-                            onClick={() => handleCopy(k.keyPrefix, k.id)}
-                            className="text-[#666] hover:text-[#141414]"
-                            title="Sao chép tiền tố key"
-                          >
-                            {copiedKeyId === k.id ? (
-                              <Check className="w-3 h-3 text-green-600" />
-                            ) : (
-                              <Copy className="w-3 h-3" />
-                            )}
-                          </button>
-                        </div>
+                          <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
+                            <div className="flex items-center bg-[#E4E3E0] border border-[#141414]/20 px-2 py-0.5 max-w-full">
+                              <code className="text-[11px] font-mono text-[#141414] select-all truncate max-w-[220px] sm:max-w-[280px]">
+                                {displayStr}
+                              </code>
+                              <button
+                                type="button"
+                                onClick={() => toggleRevealKey(k.id)}
+                                className="ml-1.5 p-0.5 text-[#666] hover:text-[#141414] transition-colors"
+                                title={isRevealed ? 'Ẩn bớt ký tự' : 'Hiển thị toàn bộ API Key thật'}
+                              >
+                                {isRevealed ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                              </button>
+                            </div>
 
-                        <div className="mt-1.5 flex flex-wrap items-center gap-3 text-[10px] font-mono text-[#666]">
-                          <span>
-                            Gọi: <strong className="text-[#141414]">{k.usageCount || 0}</strong> lần
-                          </span>
-                          <span>•</span>
-                          <span>
-                            Tạo:{' '}
-                            {new Date(k.createdAt).toLocaleDateString('vi-VN', {
-                              day: '2-digit',
-                              month: '2-digit',
-                              year: 'numeric',
-                            })}
-                          </span>
+                            <button
+                              type="button"
+                              onClick={() => handleCopy(realKey, k.id)}
+                              className="px-2 py-0.5 bg-[#141414] hover:bg-[#333] text-white text-[10px] font-mono font-bold flex items-center gap-1 transition-colors"
+                              title="Sao chép toàn bộ chuỗi API Key thật (rag_sk_live_...)"
+                            >
+                              {copiedKeyId === k.id ? (
+                                <Check className="w-3 h-3 text-green-400" />
+                              ) : (
+                                <Copy className="w-3 h-3" />
+                              )}
+                              <span>{copiedKeyId === k.id ? 'ĐÃ COPY KEY' : 'COPY RAW KEY'}</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => handleCopy(`X-API-Key: ${realKey}`, `header-${k.id}`)}
+                              className="px-2 py-0.5 bg-[#F8F7F4] hover:bg-[#E4E3E0] border border-[#141414]/30 text-[#141414] text-[10px] font-mono flex items-center gap-1 transition-colors"
+                              title="Sao chép Header HTTP X-API-Key"
+                            >
+                              {copiedKeyId === `header-${k.id}` ? (
+                                <Check className="w-3 h-3 text-green-600" />
+                              ) : (
+                                <Copy className="w-3 h-3 text-[#666]" />
+                              )}
+                              <span>{copiedKeyId === `header-${k.id}` ? 'ĐÃ COPY HEADER' : 'HEADER'}</span>
+                            </button>
+                          </div>
+
+                          <div className="mt-1.5 flex flex-wrap items-center gap-3 text-[10px] font-mono text-[#666]">
+                            <span>
+                              Gọi: <strong className="text-[#141414]">{k.usageCount || 0}</strong> lần
+                            </span>
+                            <span>•</span>
+                            <span>
+                              Tạo:{' '}
+                              {new Date(k.createdAt).toLocaleDateString('vi-VN', {
+                                day: '2-digit',
+                                month: '2-digit',
+                                year: 'numeric',
+                              })}
+                            </span>
+                          </div>
                         </div>
-                      </div>
 
                       {/* Action buttons */}
                       <div className="flex items-center gap-1">
@@ -639,35 +697,139 @@ def search_internal_rag_knowledgebase(query: str) -> str:
                       </div>
                     </div>
                   </div>
-                ))
-              )}
+                );
+              })
+            )}
             </div>
           </div>
 
-          {/* Quick Integration Docs */}
+          {/* Quick JWT Session Token & Auth Header Card for Developers */}
+          {token && (
+            <div className="border border-[#141414] bg-white p-3.5 space-y-2.5">
+              <div className="flex items-center justify-between pb-1.5 border-b border-[#E4E3E0]">
+                <h3 className="text-xs font-mono font-bold uppercase text-[#141414] flex items-center gap-1.5">
+                  <Shield className="w-3.5 h-3.5 text-blue-600" />
+                  <span>SESSION JWT TOKEN (BEARER AUTH)</span>
+                </h3>
+                <span className="text-[9px] font-mono px-1.5 py-0.2 bg-blue-50 border border-blue-400 text-blue-800 font-bold">
+                  ACTIVE_JWT
+                </span>
+              </div>
+              <p className="text-[10px] text-[#666] font-mono leading-relaxed">
+                Token phiên xác thực dùng để gọi trực tiếp các API bảo mật (`/api/kb/documents`, `/api/rag/chat`, `/api/vector/search`):
+              </p>
+
+              <div className="bg-[#F8F7F4] border border-[#141414] p-2 space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[10px] font-mono font-bold text-[#141414] uppercase">RAW JWT TOKEN:</span>
+                  <button
+                    type="button"
+                    onClick={() => handleCopy(token, 'jwt-token-raw')}
+                    className="px-2 py-0.5 bg-white hover:bg-[#E4E3E0] border border-[#141414] text-[10px] font-mono font-bold flex items-center gap-1 transition-colors"
+                  >
+                    {copiedKeyId === 'jwt-token-raw' ? (
+                      <Check className="w-3 h-3 text-green-600" />
+                    ) : (
+                      <Copy className="w-3 h-3" />
+                    )}
+                    <span>{copiedKeyId === 'jwt-token-raw' ? 'ĐÃ COPY TOKEN' : 'COPY TOKEN'}</span>
+                  </button>
+                </div>
+                <input
+                  type="text"
+                  readOnly
+                  value={token}
+                  className="w-full bg-white border border-[#141414]/30 px-2 py-1 text-[10px] font-mono text-[#555] select-all truncate"
+                />
+
+                <div className="flex items-center justify-between gap-2 pt-1 border-t border-[#E4E3E0]">
+                  <span className="text-[10px] font-mono font-bold text-[#141414] uppercase">AUTH HEADER:</span>
+                  <button
+                    type="button"
+                    onClick={() => handleCopy(`Bearer ${token}`, 'jwt-bearer-header')}
+                    className="px-2 py-0.5 bg-[#141414] hover:bg-[#333] text-white text-[10px] font-mono font-bold flex items-center gap-1 transition-colors"
+                  >
+                    {copiedKeyId === 'jwt-bearer-header' ? (
+                      <Check className="w-3 h-3 text-green-400" />
+                    ) : (
+                      <Copy className="w-3 h-3" />
+                    )}
+                    <span>{copiedKeyId === 'jwt-bearer-header' ? 'ĐÃ COPY BEARER' : 'COPY "Bearer <token>"'}</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Quick Integration Docs & Technical Specs */}
           <div className="border border-[#141414] bg-white p-3.5 space-y-2.5">
             <h3 className="text-xs font-mono font-bold uppercase text-[#141414] flex items-center gap-1.5">
               <Bot className="w-3.5 h-3.5" />
               <span>THÔNG SỐ KỸ THUẬT GATEWAY</span>
             </h3>
             <div className="space-y-1.5 text-xs font-mono">
-              <div className="flex justify-between py-1 border-b border-[#E4E3E0]">
-                <span className="text-[#666]">Auth Header:</span>
-                <code className="text-[#141414] font-bold">X-API-Key: rag_sk_live_...</code>
+              <div className="flex items-center justify-between py-1 border-b border-[#E4E3E0] gap-2">
+                <span className="text-[#666] whitespace-nowrap">Auth Header:</span>
+                <div className="flex items-center gap-1 min-w-0">
+                  <code className="text-[#141414] font-bold text-[11px] truncate">
+                    X-API-Key: {displayKey}
+                  </code>
+                  <button
+                    type="button"
+                    onClick={() => handleCopy(`X-API-Key: ${displayKey}`, 'spec-header')}
+                    className="p-1 hover:bg-[#E4E3E0] text-[#666] hover:text-[#141414] flex-shrink-0"
+                    title="Sao chép Header X-API-Key"
+                  >
+                    {copiedKeyId === 'spec-header' ? <Check className="w-3 h-3 text-green-600" /> : <Copy className="w-3 h-3" />}
+                  </button>
+                </div>
               </div>
-              <div className="flex flex-col py-1 border-b border-[#E4E3E0] gap-0.5">
-                <span className="text-[#666]">Base URL Máy chủ:</span>
-                <code className="text-[#141414] font-bold bg-[#F8F7F4] p-1 border border-[#141414]/20 break-all select-all">
+
+              <div className="flex flex-col py-1 border-b border-[#E4E3E0] gap-1">
+                <div className="flex items-center justify-between">
+                  <span className="text-[#666]">Base URL Máy chủ:</span>
+                  <button
+                    type="button"
+                    onClick={() => handleCopy(effectiveHost, 'spec-baseurl')}
+                    className="flex items-center gap-1 text-[10px] text-[#666] hover:text-[#141414] font-bold"
+                  >
+                    {copiedKeyId === 'spec-baseurl' ? <Check className="w-3 h-3 text-green-600" /> : <Copy className="w-3 h-3" />}
+                    <span>{copiedKeyId === 'spec-baseurl' ? 'ĐÃ COPY' : 'COPY URL'}</span>
+                  </button>
+                </div>
+                <code className="text-[#141414] font-bold bg-[#F8F7F4] p-1.5 border border-[#141414]/20 break-all select-all text-xs">
                   {effectiveHost}
                 </code>
               </div>
-              <div className="flex justify-between py-1 border-b border-[#E4E3E0]">
+
+              <div className="flex items-center justify-between py-1 border-b border-[#E4E3E0]">
                 <span className="text-[#666]">Chat Endpoint:</span>
-                <code className="text-[#141414]">POST /api/v1/chat</code>
+                <div className="flex items-center gap-1">
+                  <code className="text-[#141414] font-bold">POST /api/v1/chat</code>
+                  <button
+                    type="button"
+                    onClick={() => handleCopy(`${effectiveHost}/api/v1/chat`, 'spec-chat-ep')}
+                    className="p-1 hover:bg-[#E4E3E0] text-[#666] hover:text-[#141414]"
+                    title="Sao chép URL Chat"
+                  >
+                    {copiedKeyId === 'spec-chat-ep' ? <Check className="w-3 h-3 text-green-600" /> : <Copy className="w-3 h-3" />}
+                  </button>
+                </div>
               </div>
-              <div className="flex justify-between py-1">
+
+              <div className="flex items-center justify-between py-1">
                 <span className="text-[#666]">Search Endpoint:</span>
-                <code className="text-[#141414]">POST /api/v1/search</code>
+                <div className="flex items-center gap-1">
+                  <code className="text-[#141414] font-bold">POST /api/v1/search</code>
+                  <button
+                    type="button"
+                    onClick={() => handleCopy(`${effectiveHost}/api/v1/search`, 'spec-search-ep')}
+                    className="p-1 hover:bg-[#E4E3E0] text-[#666] hover:text-[#141414]"
+                    title="Sao chép URL Search"
+                  >
+                    {copiedKeyId === 'spec-search-ep' ? <Check className="w-3 h-3 text-green-600" /> : <Copy className="w-3 h-3" />}
+                  </button>
+                </div>
               </div>
             </div>
           </div>
@@ -788,6 +950,44 @@ def search_internal_rag_knowledgebase(query: str) -> str:
               </div>
             </div>
 
+            {/* Key injected into snippets selector */}
+            <div className="px-3 py-2 bg-[#F1EFEA] border-b border-[#141414]/20 flex flex-wrap items-center justify-between gap-2 text-xs font-mono">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-[11px] text-[#666] font-bold">API KEY ĐANG CHÈN:</span>
+                {keys.length > 0 ? (
+                  <select
+                    value={selectedKeyForSnippet}
+                    onChange={e => setSelectedKeyForSnippet(e.target.value)}
+                    className="bg-white border border-[#141414] px-2 py-1 text-xs font-mono font-bold text-[#141414] focus:outline-none"
+                  >
+                    {keys.map(k => (
+                      <option key={k.id} value={k.id}>
+                        {k.name} ({k.rawKey ? `${k.rawKey.slice(0, 16)}...` : k.keyPrefix})
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <span className="text-[#999] italic">Chưa có key (Đang dùng template key)</span>
+                )}
+              </div>
+
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => handleCopy(displayKey, 'snippet-raw-key')}
+                  className="px-2 py-1 bg-white hover:bg-[#E4E3E0] border border-[#141414] text-[10px] font-mono font-bold flex items-center gap-1 transition-colors"
+                  title="Sao chép chuỗi API Key thật đang được gắn trong code"
+                >
+                  {copiedKeyId === 'snippet-raw-key' ? (
+                    <Check className="w-3 h-3 text-green-600" />
+                  ) : (
+                    <Copy className="w-3 h-3" />
+                  )}
+                  <span>{copiedKeyId === 'snippet-raw-key' ? 'ĐÃ COPY KEY' : 'COPY RAW KEY NÀY'}</span>
+                </button>
+              </div>
+            </div>
+
             <div className="p-3 bg-[#1E1E1E] text-[#D4D4D4] relative">
               <div className="flex items-center justify-between pb-2 mb-2 border-b border-[#333] text-[10px] font-mono text-[#888]">
                 <span>LANGUAGE: {activeCodeTab.toUpperCase()}</span>
@@ -800,7 +1000,7 @@ def search_internal_rag_knowledgebase(query: str) -> str:
                   ) : (
                     <Copy className="w-3 h-3" />
                   )}
-                  <span>{copiedKeyId === 'code-snippet' ? 'ĐÃ SAO CHÉP' : 'SAO CHÉP CODE'}</span>
+                  <span>{copiedKeyId === 'code-snippet' ? 'ĐÃ SAO CHÉP CODE' : 'SAO CHÉP CODE'}</span>
                 </button>
               </div>
 

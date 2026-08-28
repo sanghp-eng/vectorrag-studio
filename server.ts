@@ -27,6 +27,11 @@ import {
   deleteDocument,
   searchVectorStore,
   getAiClient,
+  getUserCategories,
+  createCategory,
+  updateCategory,
+  deleteCategory,
+  updateDocumentCategory,
 } from './server/vectorStore.js';
 import { generateRAGAnswer } from './server/ragService.js';
 
@@ -617,6 +622,114 @@ Nhiệm vụ: Trích xuất và nhận dạng quang học TOÀN BỘ nội dung 
       res.json({ chunks, total: chunks.length });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ----------------------------------------------------
+  // Category Management Endpoints
+  // ----------------------------------------------------
+  // Get all categories for user with document and chunk counts
+  app.get('/api/kb/categories', authMiddleware, (req: AuthenticatedRequest, res) => {
+    try {
+      const userId = req.user!.id;
+      const categories = getUserCategories(userId);
+      res.json({ success: true, categories });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || 'Lỗi khi lấy danh sách danh mục' });
+    }
+  });
+
+  // Create new category
+  app.post('/api/kb/categories', authMiddleware, (req: AuthenticatedRequest, res) => {
+    try {
+      const userId = req.user!.id;
+      const { name, description, color, icon } = req.body;
+
+      if (!name || typeof name !== 'string' || !name.trim()) {
+        return res.status(400).json({ error: 'Tên danh mục không được để trống.' });
+      }
+
+      const category = createCategory(userId, name.trim(), description, color, icon);
+      res.json({
+        success: true,
+        category,
+        message: `Đã tạo danh mục "${category.name}" thành công.`,
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || 'Lỗi khi tạo danh mục mới' });
+    }
+  });
+
+  // Update existing category (and sync docs/chunks)
+  app.put('/api/kb/categories/:id', authMiddleware, (req: AuthenticatedRequest, res) => {
+    try {
+      const userId = req.user!.id;
+      const { id } = req.params;
+      const { name, description, color, icon } = req.body;
+
+      if (!name || typeof name !== 'string' || !name.trim()) {
+        return res.status(400).json({ error: 'Tên danh mục không được để trống.' });
+      }
+
+      const updated = updateCategory(userId, id, name.trim(), description, color, icon);
+      if (!updated) {
+        return res.status(404).json({ error: 'Không tìm thấy danh mục cần cập nhật.' });
+      }
+
+      res.json({
+        success: true,
+        category: updated,
+        message: `Đã cập nhật danh mục "${updated.name}" thành công.`,
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || 'Lỗi khi cập nhật danh mục' });
+    }
+  });
+
+  // Delete category and reassign documents
+  app.delete('/api/kb/categories/:id', authMiddleware, (req: AuthenticatedRequest, res) => {
+    try {
+      const userId = req.user!.id;
+      const { id } = req.params;
+      const { fallbackCategory = 'Tài liệu chung' } = req.body || {};
+
+      const result = deleteCategory(userId, id, fallbackCategory);
+      if (!result.success) {
+        return res.status(404).json({ error: 'Không tìm thấy danh mục cần xóa.' });
+      }
+
+      res.json({
+        success: true,
+        message: `Đã xóa danh mục. ${result.reassignedDocsCount} tài liệu đã được chuyển sang nhóm "${fallbackCategory}".`,
+        reassignedCount: result.reassignedDocsCount,
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || 'Lỗi khi xóa danh mục' });
+    }
+  });
+
+  // Quick reassign document category
+  app.patch('/api/kb/documents/:id/category', authMiddleware, (req: AuthenticatedRequest, res) => {
+    try {
+      const userId = req.user!.id;
+      const { id } = req.params;
+      const { category } = req.body;
+
+      if (!category || typeof category !== 'string' || !category.trim()) {
+        return res.status(400).json({ error: 'Vui lòng chọn danh mục mới.' });
+      }
+
+      const updated = updateDocumentCategory(userId, id, category.trim());
+      if (!updated) {
+        return res.status(404).json({ error: 'Không tìm thấy tài liệu cần chuyển danh mục.' });
+      }
+
+      res.json({
+        success: true,
+        message: `Đã chuyển tài liệu sang danh mục "${category.trim()}".`,
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || 'Lỗi khi thay đổi danh mục tài liệu' });
     }
   });
 

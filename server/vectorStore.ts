@@ -9,6 +9,17 @@ if (!fs.existsSync(DATA_DIR)) {
 
 const VECTORS_FILE = path.join(DATA_DIR, 'vectors.json');
 const DOCUMENTS_FILE = path.join(DATA_DIR, 'documents.json');
+const CATEGORIES_FILE = path.join(DATA_DIR, 'categories.json');
+
+export interface StoredCategory {
+  id: string;
+  userId: string;
+  name: string;
+  description?: string;
+  color: string;
+  icon: string;
+  createdAt: string;
+}
 
 export interface StoredChunk {
   id: string;
@@ -43,6 +54,7 @@ export interface StoredDocument {
 // In-memory cache backed by JSON files
 let storedDocuments: StoredDocument[] = [];
 let storedChunks: StoredChunk[] = [];
+let storedCategories: StoredCategory[] = [];
 
 // Load data on startup
 try {
@@ -52,6 +64,9 @@ try {
   if (fs.existsSync(VECTORS_FILE)) {
     storedChunks = JSON.parse(fs.readFileSync(VECTORS_FILE, 'utf-8'));
   }
+  if (fs.existsSync(CATEGORIES_FILE)) {
+    storedCategories = JSON.parse(fs.readFileSync(CATEGORIES_FILE, 'utf-8'));
+  }
 } catch (e) {
   console.error('Error loading stored vector data:', e);
 }
@@ -60,6 +75,7 @@ function persistData() {
   try {
     fs.writeFileSync(DOCUMENTS_FILE, JSON.stringify(storedDocuments, null, 2));
     fs.writeFileSync(VECTORS_FILE, JSON.stringify(storedChunks, null, 2));
+    fs.writeFileSync(CATEGORIES_FILE, JSON.stringify(storedCategories, null, 2));
   } catch (e) {
     console.error('Error persisting vector data:', e);
   }
@@ -482,6 +498,281 @@ export function deleteDocument(userId: string, documentId: string): boolean {
     return true;
   }
   return false;
+}
+
+// ----------------------------------------------------
+// Category Management
+// ----------------------------------------------------
+const DEFAULT_PRESET_CATEGORIES: Omit<StoredCategory, 'id' | 'userId' | 'createdAt'>[] = [
+  {
+    name: 'Chuyên ngành AI',
+    description: 'Hệ thống RAG, LLM, Vector Embeddings, Prompt Engineering & Agent',
+    color: '#2563eb',
+    icon: 'Cpu',
+  },
+  {
+    name: 'DevOps & Vận Hành',
+    description: 'Giám sát Zabbix, quy trình SOP máy chủ, MySQL, Nginx & Troubleshooting',
+    color: '#0d9488',
+    icon: 'Server',
+  },
+  {
+    name: 'Bảo Mật & Pháp Lý',
+    description: 'Tiêu chuẩn ISO 27001, Zero Trust, JWT Authentication & Access Control',
+    color: '#dc2626',
+    icon: 'Shield',
+  },
+  {
+    name: 'Tài Liệu Sản Phẩm',
+    description: 'Đặc tả kỹ thuật (Spec), hướng dẫn sử dụng sản phẩm & API Documentation',
+    color: '#9333ea',
+    icon: 'BookOpen',
+  },
+  {
+    name: 'Chính Sách & Quy Trình',
+    description: 'Quy định nội bộ, cam kết chất lượng dịch vụ SLA & văn bản hành chính',
+    color: '#d97706',
+    icon: 'FileText',
+  },
+  {
+    name: 'Tài liệu chung',
+    description: 'Tài liệu tổng hợp, ghi chú và các tệp văn bản khác',
+    color: '#4b5563',
+    icon: 'Folder',
+  },
+];
+
+export function getUserCategories(userId: string): (StoredCategory & { documentCount: number; chunkCount: number })[] {
+  let userCats = storedCategories.filter(c => c.userId === userId);
+
+  // Initialize default presets if user has no categories yet
+  if (userCats.length === 0) {
+    const now = new Date().toISOString();
+    const initialized: StoredCategory[] = DEFAULT_PRESET_CATEGORIES.map((preset, idx) => ({
+      id: `cat_${userId}_${idx}_${Date.now().toString(36)}`,
+      userId,
+      name: preset.name,
+      description: preset.description,
+      color: preset.color,
+      icon: preset.icon,
+      createdAt: now,
+    }));
+    storedCategories.push(...initialized);
+    persistData();
+    userCats = initialized;
+  }
+
+  // Also auto-discover any categories found in user's documents that aren't yet in category list
+  const userDocs = storedDocuments.filter(d => d.userId === userId);
+  const existingNames = new Set(userCats.map(c => c.name.toLowerCase()));
+  let hasNewDiscovered = false;
+
+  userDocs.forEach(d => {
+    if (d.category && !existingNames.has(d.category.toLowerCase())) {
+      const now = new Date().toISOString();
+      const newCat: StoredCategory = {
+        id: `cat_${userId}_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 6)}`,
+        userId,
+        name: d.category,
+        description: 'Danh mục được tạo tự động từ tài liệu đã nạp',
+        color: '#2563eb',
+        icon: 'Folder',
+        createdAt: now,
+      };
+      storedCategories.push(newCat);
+      userCats.push(newCat);
+      existingNames.add(d.category.toLowerCase());
+      hasNewDiscovered = true;
+    }
+  });
+
+  if (hasNewDiscovered) {
+    persistData();
+  }
+
+  const userChunks = storedChunks.filter(c => c.userId === userId);
+
+  // Compute live document and chunk counts
+  return userCats.map(cat => {
+    const catNameLower = cat.name.toLowerCase();
+    const docCount = userDocs.filter(d => (d.category || '').toLowerCase() === catNameLower).length;
+    const chunkCount = userChunks.filter(c => (c.category || '').toLowerCase() === catNameLower).length;
+
+    return {
+      ...cat,
+      documentCount: docCount,
+      chunkCount: chunkCount,
+    };
+  });
+}
+
+export function createCategory(
+  userId: string,
+  name: string,
+  description = '',
+  color = '#2563eb',
+  icon = 'Folder'
+): StoredCategory {
+  const cleanName = name.trim();
+  if (!cleanName) {
+    throw new Error('Tên danh mục không được để trống.');
+  }
+
+  // Check if exists for user
+  const existing = storedCategories.find(
+    c => c.userId === userId && c.name.toLowerCase() === cleanName.toLowerCase()
+  );
+  if (existing) {
+    return existing;
+  }
+
+  const now = new Date().toISOString();
+  const newCat: StoredCategory = {
+    id: `cat_${userId}_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 6)}`,
+    userId,
+    name: cleanName,
+    description: description.trim(),
+    color: color || '#2563eb',
+    icon: icon || 'Folder',
+    createdAt: now,
+  };
+
+  storedCategories.push(newCat);
+  persistData();
+  return newCat;
+}
+
+export function updateCategory(
+  userId: string,
+  id: string,
+  name: string,
+  description?: string,
+  color?: string,
+  icon?: string
+): StoredCategory | null {
+  const cleanName = name.trim();
+  if (!cleanName) {
+    throw new Error('Tên danh mục không được để trống.');
+  }
+
+  const catIndex = storedCategories.findIndex(c => c.userId === userId && c.id === id);
+  if (catIndex === -1) return null;
+
+  const oldName = storedCategories[catIndex].name;
+  storedCategories[catIndex] = {
+    ...storedCategories[catIndex],
+    name: cleanName,
+    description: description !== undefined ? description.trim() : storedCategories[catIndex].description,
+    color: color || storedCategories[catIndex].color,
+    icon: icon || storedCategories[catIndex].icon,
+  };
+
+  // If category name was changed, sync documents and chunks
+  if (oldName !== cleanName) {
+    storedDocuments.forEach(d => {
+      if (d.userId === userId && d.category.toLowerCase() === oldName.toLowerCase()) {
+        d.category = cleanName;
+        d.updatedAt = new Date().toISOString();
+      }
+    });
+
+    storedChunks.forEach(c => {
+      if (c.userId === userId && c.category.toLowerCase() === oldName.toLowerCase()) {
+        c.category = cleanName;
+      }
+    });
+  }
+
+  persistData();
+  return storedCategories[catIndex];
+}
+
+export function deleteCategory(
+  userId: string,
+  id: string,
+  fallbackCategory = 'Tài liệu chung'
+): { success: boolean; reassignedDocsCount: number } {
+  const cat = storedCategories.find(c => c.userId === userId && c.id === id);
+  if (!cat) return { success: false, reassignedDocsCount: 0 };
+
+  const targetCategoryName = cat.name;
+  let reassignedDocsCount = 0;
+
+  // Reassign docs of this category to fallback category
+  storedDocuments.forEach(d => {
+    if (d.userId === userId && d.category.toLowerCase() === targetCategoryName.toLowerCase()) {
+      d.category = fallbackCategory;
+      d.updatedAt = new Date().toISOString();
+      reassignedDocsCount++;
+    }
+  });
+
+  storedChunks.forEach(c => {
+    if (c.userId === userId && c.category.toLowerCase() === targetCategoryName.toLowerCase()) {
+      c.category = fallbackCategory;
+    }
+  });
+
+  // Ensure fallback category exists if docs were reassigned
+  if (reassignedDocsCount > 0) {
+    const hasFallback = storedCategories.some(
+      c => c.userId === userId && c.name.toLowerCase() === fallbackCategory.toLowerCase()
+    );
+    if (!hasFallback) {
+      storedCategories.push({
+        id: `cat_${userId}_${Date.now().toString(36)}`,
+        userId,
+        name: fallbackCategory,
+        description: 'Danh mục mặc định sau khi di chuyển',
+        color: '#4b5563',
+        icon: 'Folder',
+        createdAt: new Date().toISOString(),
+      });
+    }
+  }
+
+  // Remove category
+  storedCategories = storedCategories.filter(c => !(c.userId === userId && c.id === id));
+  persistData();
+
+  return { success: true, reassignedDocsCount };
+}
+
+export function updateDocumentCategory(userId: string, docId: string, newCategory: string): boolean {
+  const cleanCategory = newCategory.trim();
+  if (!cleanCategory) return false;
+
+  const doc = storedDocuments.find(d => d.userId === userId && d.id === docId);
+  if (!doc) return false;
+
+  doc.category = cleanCategory;
+  doc.updatedAt = new Date().toISOString();
+
+  // Update associated chunks
+  storedChunks.forEach(c => {
+    if (c.userId === userId && c.documentId === docId) {
+      c.category = cleanCategory;
+    }
+  });
+
+  // Ensure category exists in categories list
+  const existingCat = storedCategories.find(
+    c => c.userId === userId && c.name.toLowerCase() === cleanCategory.toLowerCase()
+  );
+  if (!existingCat) {
+    storedCategories.push({
+      id: `cat_${userId}_${Date.now().toString(36)}`,
+      userId,
+      name: cleanCategory,
+      description: 'Danh mục tự tạo',
+      color: '#2563eb',
+      icon: 'Folder',
+      createdAt: new Date().toISOString(),
+    });
+  }
+
+  persistData();
+  return true;
 }
 
 export async function searchVectorStore(

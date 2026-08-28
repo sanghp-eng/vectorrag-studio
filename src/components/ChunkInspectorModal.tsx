@@ -1,6 +1,7 @@
 import React from 'react';
 import { X, FileText, Hash, Layers, ShieldCheck, Activity, Copy, Check } from 'lucide-react';
 import { DocumentChunk } from '../types';
+import { copyToClipboard } from '../utils/clipboard';
 
 interface ChunkInspectorModalProps {
   chunk: DocumentChunk | null;
@@ -17,10 +18,12 @@ export const ChunkInspectorModal: React.FC<ChunkInspectorModalProps> = ({
 
   if (!chunk) return null;
 
-  const handleCopy = () => {
-    navigator.clipboard.writeText(chunk.content);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+  const handleCopy = async () => {
+    const success = await copyToClipboard(chunk.content);
+    if (success) {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
   };
 
   return (

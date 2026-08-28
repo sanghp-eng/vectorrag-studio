@@ -21,9 +21,13 @@ import {
   Zap,
   Bot,
   ArrowRight,
+  Copy,
+  Check,
+  Shield,
 } from 'lucide-react';
 import { RAGSettings, GeminiApiKeyStatus } from '../types';
 import { useAuth } from '../context/AuthContext';
+import { copyToClipboard } from '../utils/clipboard';
 
 interface SettingsViewProps {
   settings: RAGSettings;
@@ -38,7 +42,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   documentCount,
   chunkCount,
 }) => {
-  const { user, authHeader } = useAuth();
+  const { user, authHeader, token } = useAuth();
 
   // Gemini API Key state
   const [apiKeyInput, setApiKeyInput] = useState('');
@@ -51,6 +55,16 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     type: 'success' | 'error' | 'info';
     text: string;
   } | null>(null);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  const handleCopy = async (text: string, id: string) => {
+    if (!text && text !== '') return;
+    const ok = await copyToClipboard(text);
+    if (ok) {
+      setCopiedId(id);
+      setTimeout(() => setCopiedId(null), 2200);
+    }
+  };
 
   const fetchKeyStatus = async () => {
     setIsLoadingKeyStatus(true);
@@ -292,7 +306,20 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           </div>
 
           <div className="bg-[#F8F7F4] p-3 border border-[#141414] space-y-1">
-            <span className="text-[9px] text-[#666] uppercase block font-bold">MASKED_KEY_SIGNATURE:</span>
+            <div className="flex items-center justify-between">
+              <span className="text-[9px] text-[#666] uppercase block font-bold">MASKED_KEY_SIGNATURE:</span>
+              {keyStatus?.maskedKey && (
+                <button
+                  type="button"
+                  onClick={() => handleCopy(keyStatus.maskedKey || '', 'masked-key')}
+                  className="text-[10px] font-mono text-[#666] hover:text-[#141414] flex items-center gap-1"
+                  title="Sao chép tiền tố key"
+                >
+                  {copiedId === 'masked-key' ? <Check className="w-3 h-3 text-green-600" /> : <Copy className="w-3 h-3" />}
+                  <span>{copiedId === 'masked-key' ? 'ĐÃ COPY' : 'COPY'}</span>
+                </button>
+              )}
+            </div>
             <div className="text-xs font-mono font-bold text-[#141414]">
               {keyStatus?.maskedKey || 'NO_KEY_CONFIGURED'}
             </div>
@@ -567,6 +594,44 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             </ul>
           </div>
         </div>
+
+        {/* JWT Session Token Box */}
+        {token && (
+          <div className="bg-[#F8F7F4] border border-[#141414] p-3 space-y-2 mt-2">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <div className="flex items-center gap-1.5">
+                <Shield className="w-3.5 h-3.5 text-blue-600" />
+                <span className="text-xs font-mono font-bold text-[#141414]">
+                  SESSION_JWT_TOKEN (BEARER TOKEN XÁC THỰC API)
+                </span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => handleCopy(token, 'settings-jwt-token')}
+                  className="px-2.5 py-1 bg-white hover:bg-[#E4E3E0] border border-[#141414] text-[10px] font-mono font-bold flex items-center gap-1 transition-colors"
+                >
+                  {copiedId === 'settings-jwt-token' ? <Check className="w-3 h-3 text-green-600" /> : <Copy className="w-3 h-3" />}
+                  <span>{copiedId === 'settings-jwt-token' ? 'ĐÃ COPY TOKEN' : 'COPY RAW TOKEN'}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleCopy(`Bearer ${token}`, 'settings-jwt-bearer')}
+                  className="px-2.5 py-1 bg-[#141414] hover:bg-[#333] text-white text-[10px] font-mono font-bold flex items-center gap-1 transition-colors"
+                >
+                  {copiedId === 'settings-jwt-bearer' ? <Check className="w-3 h-3 text-green-400" /> : <Copy className="w-3 h-3" />}
+                  <span>{copiedId === 'settings-jwt-bearer' ? 'ĐÃ COPY HEADER' : 'COPY "Bearer <token>"'}</span>
+                </button>
+              </div>
+            </div>
+            <input
+              type="text"
+              readOnly
+              value={token}
+              className="w-full bg-white border border-[#141414]/30 px-2.5 py-1.5 text-[11px] font-mono text-[#444] select-all truncate"
+            />
+          </div>
+        )}
       </div>
 
       {/* RAG Architecture Diagram */}

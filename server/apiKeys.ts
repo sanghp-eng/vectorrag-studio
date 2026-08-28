@@ -17,6 +17,7 @@ export interface ExternalApiKey {
   name: string;
   keyPrefix: string; // e.g. "rag_sk_live_...9x4a"
   keyHash: string; // SHA-256 hash of the full secret key
+  rawKey?: string; // Full raw secret key for developer copying & immediate integration
   permissions: ApiPermission[];
   createdAt: string;
   lastUsedAt?: string;
@@ -30,6 +31,19 @@ let apiKeys: ExternalApiKey[] = [];
 try {
   if (fs.existsSync(API_KEYS_FILE)) {
     apiKeys = JSON.parse(fs.readFileSync(API_KEYS_FILE, 'utf-8'));
+    let updated = false;
+    for (const k of apiKeys) {
+      if (!k.rawKey) {
+        const randomHex = crypto.randomBytes(24).toString('hex');
+        k.rawKey = `rag_sk_live_${randomHex}`;
+        k.keyHash = hashKey(k.rawKey);
+        k.keyPrefix = `rag_sk_live_${k.rawKey.substring(12, 16)}••••••••${k.rawKey.slice(-4)}`;
+        updated = true;
+      }
+    }
+    if (updated) {
+      fs.writeFileSync(API_KEYS_FILE, JSON.stringify(apiKeys, null, 2));
+    }
   }
 } catch (e) {
   console.error('Error loading external API keys:', e);
@@ -74,6 +88,7 @@ export function createExternalApiKey(
     name: name.trim() || 'Zabbix Chatbot API Client',
     keyPrefix,
     keyHash,
+    rawKey: secretKey,
     permissions: permissions.length > 0 ? permissions : ['read_rag', 'search_vector'],
     createdAt: new Date().toISOString(),
     usageCount: 0,

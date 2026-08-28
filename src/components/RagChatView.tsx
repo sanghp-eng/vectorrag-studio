@@ -23,6 +23,7 @@ import Markdown from 'react-markdown';
 import { useAuth } from '../context/AuthContext';
 import { ChatMessage, CitationSource, DocumentChunk, RAGSettings } from '../types';
 import { ChunkInspectorModal } from './ChunkInspectorModal';
+import { copyToClipboard } from '../utils/clipboard';
 
 interface RagChatViewProps {
   settings: RAGSettings;
@@ -129,10 +130,13 @@ Bạn có thể thử đặt câu hỏi về các tài liệu kiến thức có 
     }
   };
 
-  const handleCopy = (id: string, text: string) => {
-    navigator.clipboard.writeText(text);
-    setCopiedId(id);
-    setTimeout(() => setCopiedId(null), 2000);
+  const handleCopy = async (id: string, text: string) => {
+    if (!text && text !== '') return;
+    const ok = await copyToClipboard(text);
+    if (ok) {
+      setCopiedId(id);
+      setTimeout(() => setCopiedId(null), 2000);
+    }
   };
 
   const handleClearChat = () => {

@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   X,
   UploadCloud,
@@ -12,24 +12,33 @@ import {
   ScanText,
   CheckCircle2,
   FileType,
+  FolderPlus,
+  Plus,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { isPdfFile, parsePdfWithOcr } from '../utils/pdfParser';
+import { KBCategory } from '../types';
+import { renderCategoryIcon } from './CategoryManageModal';
 
 interface DocumentModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSuccess: () => void;
+  categories?: KBCategory[];
 }
 
 export const DocumentModal: React.FC<DocumentModalProps> = ({
   isOpen,
   onClose,
   onSuccess,
+  categories: initialCategories = [],
 }) => {
   const { authHeader } = useAuth();
   const [title, setTitle] = useState('');
   const [category, setCategory] = useState('Chuyên ngành AI');
+  const [isCreatingNewCat, setIsCreatingNewCat] = useState(false);
+  const [newCatName, setNewCatName] = useState('');
+  const [categoriesList, setCategoriesList] = useState<KBCategory[]>(initialCategories);
   const [tagsInput, setTagsInput] = useState('');
   const [content, setContent] = useState('');
   const [chunkingStrategy, setChunkingStrategy] = useState<'paragraph' | 'fixed_window' | 'semantic_sentence'>('paragraph');
@@ -37,6 +46,23 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
   const [chunkOverlap, setChunkOverlap] = useState(50);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Fetch updated categories on open
+  useEffect(() => {
+    if (isOpen) {
+      fetch('/api/kb/categories', { headers: authHeader })
+        .then(res => res.json())
+        .then(data => {
+          if (data.categories && data.categories.length > 0) {
+            setCategoriesList(data.categories);
+            if (!category || !data.categories.some((c: KBCategory) => c.name === category)) {
+              setCategory(data.categories[0].name);
+            }
+          }
+        })
+        .catch(err => console.error('Error fetching categories:', err));
+    }
+  }, [isOpen, authHeader]);
 
   // PDF OCR states
   const [isOcrProcessing, setIsOcrProcessing] = useState(false);
@@ -306,19 +332,77 @@ export const DocumentModal: React.FC<DocumentModalProps> = ({
             </div>
 
             <div>
-              <label className="block text-[10px] font-bold text-[#141414] uppercase mb-1">CATEGORY_TAG</label>
-              <select
-                value={category}
-                onChange={e => setCategory(e.target.value)}
-                className="w-full bg-[#F8F7F4] border border-[#141414] px-3 py-1.5 text-xs text-[#141414] focus:outline-none focus:bg-white"
-              >
-                <option value="Chuyên ngành AI">AI & Vector Systems</option>
-                <option value="Bảo mật & Pháp lý">Security & Governance</option>
-                <option value="Tài liệu Sản phẩm">Product Documentation</option>
-                <option value="Chính sách Công ty">Corporate Policies</option>
-                <option value="Kỹ thuật & Kiến trúc">System Architecture</option>
-                <option value="Khác">Miscellaneous</option>
-              </select>
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-[10px] font-bold text-[#141414] uppercase">
+                  DANH MỤC PHÂN LOẠI (CATEGORY)
+                </label>
+                <button
+                  type="button"
+                  onClick={() => setIsCreatingNewCat(!isCreatingNewCat)}
+                  className="text-[10px] text-blue-700 hover:text-blue-900 font-bold flex items-center gap-1 underline"
+                >
+                  {isCreatingNewCat ? 'Chọn có sẵn' : '+ Tạo nhóm mới'}
+                </button>
+              </div>
+
+              {isCreatingNewCat ? (
+                <div className="flex items-center gap-1.5">
+                  <input
+                    type="text"
+                    value={newCatName}
+                    onChange={e => setNewCatName(e.target.value)}
+                    placeholder="Nhập tên danh mục mới..."
+                    className="flex-1 bg-white border border-[#141414] px-2.5 py-1.5 text-xs text-[#141414] placeholder-[#888] focus:outline-none ring-1 ring-[#141414]"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (newCatName.trim()) {
+                        const trimmed = newCatName.trim();
+                        setCategory(trimmed);
+                        if (!categoriesList.some(c => c.name.toLowerCase() === trimmed.toLowerCase())) {
+                          setCategoriesList(prev => [
+                            ...prev,
+                            {
+                              id: `temp_${Date.now()}`,
+                              userId: '',
+                              name: trimmed,
+                              color: '#2563eb',
+                              icon: 'Folder',
+                              createdAt: new Date().toISOString(),
+                            },
+                          ]);
+                        }
+                        setIsCreatingNewCat(false);
+                        setNewCatName('');
+                      }
+                    }}
+                    disabled={!newCatName.trim()}
+                    className="px-2.5 py-1.5 bg-[#141414] hover:bg-[#333] disabled:opacity-50 text-white text-xs font-bold"
+                  >
+                    Dùng
+                  </button>
+                </div>
+              ) : (
+                <select
+                  value={category}
+                  onChange={e => {
+                    if (e.target.value === '__NEW__') {
+                      setIsCreatingNewCat(true);
+                    } else {
+                      setCategory(e.target.value);
+                    }
+                  }}
+                  className="w-full bg-[#F8F7F4] border border-[#141414] px-3 py-1.5 text-xs text-[#141414] focus:outline-none focus:bg-white"
+                >
+                  {categoriesList.map(cat => (
+                    <option key={cat.id} value={cat.name}>
+                      📁 {cat.name} {cat.documentCount ? `(${cat.documentCount} tài liệu)` : ''}
+                    </option>
+                  ))}
+                  <option value="__NEW__">+ [Tạo danh mục mới...]</option>
+                </select>
+              )}
             </div>
           </div>
 

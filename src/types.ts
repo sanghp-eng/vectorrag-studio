@@ -28,6 +28,18 @@ export interface DocumentChunk {
   createdAt: string;
 }
 
+export interface KBCategory {
+  id: string;
+  userId: string;
+  name: string;
+  description?: string;
+  color?: string;
+  icon?: string;
+  createdAt: string;
+  documentCount?: number;
+  chunkCount?: number;
+}
+
 export interface KBDocument {
   id: string;
   userId: string;
@@ -100,6 +112,7 @@ export interface ExternalApiKey {
   userId: string;
   name: string;
   keyPrefix: string;
+  rawKey?: string;
   permissions: ('read_rag' | 'search_vector' | 'ingest_doc' | 'full_access')[];
   createdAt: string;
   lastUsedAt?: string;
