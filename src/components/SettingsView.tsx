@@ -19,6 +19,8 @@ import {
   ExternalLink,
   ShieldAlert,
   Zap,
+  Bot,
+  ArrowRight,
 } from 'lucide-react';
 import { RAGSettings, GeminiApiKeyStatus } from '../types';
 import { useAuth } from '../context/AuthContext';
@@ -210,6 +212,31 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               VECTORS: {chunkCount}
             </span>
           </div>
+        </div>
+      </div>
+
+      {/* EXTERNAL CLIENT INTEGRATION & ZABBIX GATEWAY BANNER */}
+      <div className="bg-[#141414] text-white border border-[#141414] p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+        <div className="flex items-start gap-3">
+          <div className="w-8 h-8 bg-green-500 text-[#141414] flex items-center justify-center flex-shrink-0 font-bold">
+            <Bot className="w-4 h-4" />
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-bold uppercase text-green-400">
+                TÍCH HỢP CHATBOX ZABBIX & CLIENT NGOÀI
+              </span>
+              <span className="bg-green-900 text-green-300 text-[9px] px-1.5 py-0.2 border border-green-500 font-bold">
+                API GATEWAY V1
+              </span>
+            </div>
+            <p className="text-[11px] text-gray-300 mt-0.5">
+              Cung cấp API Key chuyên dụng (`rag_sk_live_...`), hướng dẫn mã nguồn Zabbix Python script, cURL, LangChain để Chatbot tra cứu SOP & Runbook xử lý lỗi trực tiếp.
+            </p>
+          </div>
+        </div>
+        <div className="text-[11px] text-gray-400 whitespace-nowrap">
+          Chuyển sang tab <strong className="text-white">"Cổng API (Zabbix/Bot)"</strong> trên thanh menu để cấu hình.
         </div>
       </div>
 

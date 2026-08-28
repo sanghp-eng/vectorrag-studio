@@ -94,6 +94,19 @@ export interface GeminiApiKeyStatus {
   hasCustomKey: boolean;
 }
 
+export interface ExternalApiKey {
+  id: string;
+  userId: string;
+  name: string;
+  keyPrefix: string;
+  permissions: ('read_rag' | 'search_vector' | 'ingest_doc' | 'full_access')[];
+  createdAt: string;
+  lastUsedAt?: string;
+  usageCount: number;
+  isActive: boolean;
+  expiresAt?: string;
+}
+
 export interface RAGSettings {
   topK: number;
   similarityThreshold: number;
@@ -104,3 +117,4 @@ export interface RAGSettings {
   chunkSize: number;
   chunkOverlap: number;
 }
+

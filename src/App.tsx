@@ -7,6 +7,7 @@ import { RagChatView } from './components/RagChatView';
 import { SemanticSearchView } from './components/SemanticSearchView';
 import { KnowledgeBaseView } from './components/KnowledgeBaseView';
 import { VectorVisualizerView } from './components/VectorVisualizerView';
+import { ApiHubView } from './components/ApiHubView';
 import { SettingsView } from './components/SettingsView';
 import { KBDocument, DocumentChunk, RAGSettings } from './types';
 
@@ -97,6 +98,13 @@ function MainApp() {
             isLoading={isLoadingData}
             onRefresh={fetchData}
             onOpenDocModal={() => setIsDocModalOpen(true)}
+          />
+        )}
+
+        {activeTab === 'api_hub' && (
+          <ApiHubView
+            documentCount={documents.length}
+            chunkCount={chunks.length}
           />
         )}
 

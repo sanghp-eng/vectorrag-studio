@@ -14,6 +14,12 @@ import {
   setUserApiKey,
 } from './server/auth.js';
 import {
+  createExternalApiKey,
+  getUserApiKeys,
+  revokeApiKey,
+  toggleApiKeyStatus,
+} from './server/apiKeys.js';
+import {
   addDocument,
   getUserDocuments,
   getUserChunks,
@@ -234,6 +240,194 @@ async function startServer() {
       });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ----------------------------------------------------
+  // External API Key Management (For Zabbix, Agents, Scripts)
+  // ----------------------------------------------------
+  // List all external API keys for current user
+  app.get('/api/keys', authMiddleware, (req: AuthenticatedRequest, res) => {
+    try {
+      const userId = req.user!.id;
+      const keys = getUserApiKeys(userId);
+      res.json({ success: true, keys });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || 'Lỗi khi lấy danh sách API Key' });
+    }
+  });
+
+  // Generate a new external API Key
+  app.post('/api/keys', authMiddleware, (req: AuthenticatedRequest, res) => {
+    try {
+      const userId = req.user!.id;
+      const { name, permissions, expiresDays } = req.body;
+
+      if (!name || typeof name !== 'string' || !name.trim()) {
+        return res.status(400).json({ error: 'Vui lòng đặt tên gợi nhớ cho API Key (ví dụ: "Zabbix Chatbot").' });
+      }
+
+      const result = createExternalApiKey(
+        userId,
+        name.trim(),
+        Array.isArray(permissions) ? permissions : ['read_rag', 'search_vector'],
+        expiresDays ? Number(expiresDays) : undefined
+      );
+
+      res.json({
+        success: true,
+        message: 'Đã tạo API Key mới thành công. Hãy sao chép khóa ngay bây giờ vì bạn sẽ không thể nhìn thấy lại toàn bộ khóa này.',
+        apiKey: result.apiKey,
+        secretKey: result.secretKey, // Returned once
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || 'Lỗi khi tạo API Key' });
+    }
+  });
+
+  // Revoke / Delete an external API Key
+  app.delete('/api/keys/:id', authMiddleware, (req: AuthenticatedRequest, res) => {
+    try {
+      const userId = req.user!.id;
+      const { id } = req.params;
+      const deleted = revokeApiKey(userId, id);
+      if (!deleted) {
+        return res.status(404).json({ error: 'Không tìm thấy API Key hoặc bạn không có quyền thao tác.' });
+      }
+      res.json({ success: true, message: 'Đã thu hồi và xóa vĩnh viễn API Key.' });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || 'Lỗi khi thu hồi API Key' });
+    }
+  });
+
+  // Toggle active status for an API Key
+  app.patch('/api/keys/:id/toggle', authMiddleware, (req: AuthenticatedRequest, res) => {
+    try {
+      const userId = req.user!.id;
+      const { id } = req.params;
+      const updated = toggleApiKeyStatus(userId, id);
+      if (!updated) {
+        return res.status(404).json({ error: 'Không tìm thấy API Key.' });
+      }
+      res.json({
+        success: true,
+        message: updated.isActive ? 'Đã kích hoạt lại API Key.' : 'Đã tạm dừng hoạt động API Key.',
+        apiKey: updated,
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || 'Lỗi khi cập nhật trạng thái API Key' });
+    }
+  });
+
+  // ----------------------------------------------------
+  // Dedicated v1 External Agent Endpoints (Zabbix, LangChain, n8n, Python)
+  // ----------------------------------------------------
+  // External Bot Health & Stats Check
+  app.get('/api/v1/status', authMiddleware, (req: AuthenticatedRequest, res) => {
+    try {
+      const userId = req.user!.id;
+      const docs = getUserDocuments(userId);
+      const chunks = getUserChunks(userId);
+      res.json({
+        status: 'ready',
+        service: 'Vector RAG Knowledgebase Engine v2.4',
+        user: req.user?.name,
+        totalDocuments: docs.length,
+        totalVectorChunks: chunks.length,
+        categories: Array.from(new Set(docs.map(d => d.category))),
+        timestamp: new Date().toISOString(),
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // External Bot RAG Query (Clean endpoint alias with prompt wrapper)
+  app.post('/api/v1/chat', authMiddleware, async (req: AuthenticatedRequest, res) => {
+    try {
+      const userId = req.user!.id;
+      const effectiveApiKey = resolveUserApiKey(req);
+      const {
+        query,
+        topK = 4,
+        similarityThreshold = 0.35,
+        strictGrounding = true,
+        temperature = 0.2,
+        categoryFilter,
+      } = req.body;
+
+      if (!query || typeof query !== 'string' || !query.trim()) {
+        return res.status(400).json({ error: 'Tham số `query` không được để trống.' });
+      }
+
+      const result = await generateRAGAnswer(userId, query.trim(), {
+        topK: Number(topK),
+        similarityThreshold: Number(similarityThreshold),
+        strictGrounding: Boolean(strictGrounding),
+        temperature: Number(temperature),
+        categoryFilter,
+        customApiKey: effectiveApiKey,
+      });
+
+      res.json({
+        success: true,
+        query: query.trim(),
+        answer: result.answer,
+        citations: result.citations,
+        metrics: {
+          retrievalLatencyMs: result.retrievalLatencyMs,
+          generationLatencyMs: result.generationLatencyMs,
+          topSimilarity: result.topSimilarity,
+          chunksRetrieved: result.relevantChunks.length,
+          modelUsed: result.modelUsed,
+        },
+      });
+    } catch (err: any) {
+      console.error('v1 Chat error:', err);
+      res.status(500).json({ error: err.message || 'Lỗi khi xử lý truy vấn RAG' });
+    }
+  });
+
+  // External Bot Raw Vector Search
+  app.post('/api/v1/search', authMiddleware, async (req: AuthenticatedRequest, res) => {
+    const startTime = Date.now();
+    try {
+      const userId = req.user!.id;
+      const effectiveApiKey = resolveUserApiKey(req);
+      const { query, topK = 4, similarityThreshold = 0.3, categoryFilter } = req.body;
+
+      if (!query || typeof query !== 'string') {
+        return res.status(400).json({ error: 'Tham số `query` không được để trống.' });
+      }
+
+      const searchRes = await searchVectorStore(
+        userId,
+        query.trim(),
+        Number(topK),
+        Number(similarityThreshold),
+        categoryFilter,
+        undefined,
+        effectiveApiKey
+      );
+
+      const formattedResults = searchRes.results.map(item => ({
+        documentTitle: item.chunk.documentTitle,
+        category: item.chunk.category,
+        chunkIndex: item.chunk.chunkIndex,
+        content: item.chunk.content,
+        similarity: Math.round(item.similarity * 1000) / 1000,
+        characterCount: item.chunk.characterCount,
+      }));
+
+      res.json({
+        success: true,
+        query: query.trim(),
+        results: formattedResults,
+        totalFound: formattedResults.length,
+        executionTimeMs: Date.now() - startTime,
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message || 'Lỗi khi tìm kiếm vector' });
     }
   });
 

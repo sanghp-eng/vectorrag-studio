@@ -111,9 +111,46 @@ Kỹ thuật Re-ranking & Context Compression:
 Sau khi lấy Top-K từ vector search, có thể áp dụng thuật toán lọc lại để sắp xếp các đoạn quan trọng nhất lên đầu prompt, giúp LLM tập trung vào ý chính và giảm lượng token tiêu thụ.`,
   };
 
+  const sampleDoc4 = {
+    title: 'SOP & Runbook Xử lý Sự cố Máy chủ & Cảnh báo Zabbix Monitoring (DevOps & SysAdmin)',
+    category: 'IT & DevOps Runbooks',
+    tags: ['Zabbix', 'DevOps', 'Runbook', 'Troubleshooting', 'Linux', 'MySQL', 'Nginx'],
+    content: `Quy trình Chuẩn (SOP) tiếp nhận và khắc phục các cảnh báo thường gặp từ hệ thống Zabbix Monitoring:
+
+1. CẢNH BÁO: DISK SPACE IS CRITICALLY LOW (>90%) TRÊN /var/log HOẶC /
+- Nguyên nhân: Log xoay vòng thất bại (logrotate failed), core dump file tích tụ hoặc database binary log quá lớn.
+- Các bước xử lý:
+  Bước 1: Chạy lệnh 'df -h' để xác định phân vùng bị đầy.
+  Bước 2: Tìm top thư mục chiếm dung lượng lớn: 'du -sh /var/log/* | sort -hr | head -n 10'.
+  Bước 3: Dọn dẹp log cũ an toàn: 'journalctl --vacuum-time=3d' hoặc nén archive log cũ. Không dùng lệnh 'rm' trực tiếp khi service đang mở file write handle; thay vào đó dùng 'truncate -s 0 /var/log/app.log'.
+  Bước 4: Kiểm tra lại Zabbix agent: 'zabbix_get -s 127.0.0.1 -k vfs.fs.size[/,pused]'.
+
+2. CẢNH BÁO: HIGH CPU UTILIZATION (>95%) HOẶC OUT OF MEMORY (OOM)
+- Nguyên nhân: Tiến trình chạy vòng lặp vô tận, rò rỉ bộ nhớ (memory leak) hoặc bị tấn công DoS/Brute-force.
+- Các bước xử lý:
+  Bước 1: Kiểm tra tổng quan: 'top -c' hoặc 'htop', bấm 'P' để sort CPU, 'M' để sort RAM.
+  Bước 2: Kiểm tra dmesg xem có tiến trình nào bị OOM Killer dừng không: 'dmesg -T | grep -i oom'.
+  Bước 3: Tối ưu service hoặc restart service bị crash: 'systemctl status <service>' -> 'systemctl restart <service>'.
+
+3. CẢNH BÁO: MYSQL SERVICE DOWN & CONNECTION REFUSED (PORT 3306)
+- Nguyên nhân: MySQL bị OOM kill do innodb_buffer_pool_size cấu hình vượt quá dung lượng RAM thực, hoặc deadlock crash.
+- Các bước xử lý:
+  Bước 1: Kiểm tra error log MySQL: 'tail -n 100 /var/log/mysql/error.log'.
+  Bước 2: Khởi động lại an toàn: 'systemctl restart mysql'.
+  Bước 3: Kiểm tra số lượng kết nối đang mở: 'mysqladmin processlist' và điều chỉnh 'max_connections' trong my.cnf nếu cần.
+
+4. CẢNH BÁO: NGINX / WEB SERVICE 502 BAD GATEWAY
+- Nguyên nhân: Upstream backend (Node.js, PHP-FPM, Python Gunicorn) bị treo hoặc socket bị quá tải.
+- Các bước xử lý:
+  Bước 1: Kiểm tra nginx error log: 'tail -f /var/log/nginx/error.log'.
+  Bước 2: Xác nhận backend upstream service đang lắng nghe: 'netstat -tulnp | grep 3000'.
+  Bước 3: Reload nginx cấu hình: 'nginx -t && systemctl reload nginx'.`,
+  };
+
   await addDocument(userId, sampleDoc1.title, sampleDoc1.content, sampleDoc1.category, sampleDoc1.tags, 'paragraph');
   await addDocument(userId, sampleDoc2.title, sampleDoc2.content, sampleDoc2.category, sampleDoc2.tags, 'paragraph');
   await addDocument(userId, sampleDoc3.title, sampleDoc3.content, sampleDoc3.category, sampleDoc3.tags, 'semantic_sentence');
+  await addDocument(userId, sampleDoc4.title, sampleDoc4.content, sampleDoc4.category, sampleDoc4.tags, 'paragraph');
 }
 
 // Initialize demo user if not exists
@@ -133,6 +170,17 @@ export async function ensureDemoUser() {
     persistUsers();
   }
   await seedSampleKnowledgeBase(demoUser.id);
+
+  // Seed sample API key for demo user if none exists
+  try {
+    const { getUserApiKeys, createExternalApiKey } = await import('./apiKeys.js');
+    const existingKeys = getUserApiKeys(demoUser.id);
+    if (existingKeys.length === 0) {
+      createExternalApiKey(demoUser.id, 'Zabbix Chatbot Monitoring Client', ['read_rag', 'search_vector']);
+    }
+  } catch (e) {
+    console.error('Error seeding demo API key:', e);
+  }
 }
 
 // Ensure demo user runs on module load
@@ -158,10 +206,42 @@ export interface AuthenticatedRequest extends Request {
   };
 }
 
+export function findUserById(userId: string): UserRecord | undefined {
+  return users.find(u => u.id === userId);
+}
+
 export function authMiddleware(req: AuthenticatedRequest, res: Response, next: NextFunction) {
+  // Check for X-API-Key header first
+  const apiKeyHeader = req.headers['x-api-key'] as string | undefined;
   const authHeader = req.headers.authorization;
+
+  let rawApiKey = apiKeyHeader;
+  if (!rawApiKey && authHeader && authHeader.startsWith('Bearer rag_sk_live_')) {
+    rawApiKey = authHeader.substring(7);
+  }
+
+  // If using an External API Key (e.g. from Zabbix, Curl, LangChain)
+  if (rawApiKey && rawApiKey.startsWith('rag_sk_live_')) {
+    const { validateApiKey } = require('./apiKeys.js');
+    const result = validateApiKey(rawApiKey);
+    if (!result.valid || !result.userId) {
+      return res.status(401).json({ error: result.error || 'API Key không hợp lệ hoặc đã bị vô hiệu hóa.' });
+    }
+
+    const matchedUser = findUserById(result.userId);
+    req.user = {
+      id: result.userId,
+      email: matchedUser?.email || 'api-client@external',
+      name: matchedUser?.name || result.keyInfo?.name || 'External API Client',
+    };
+    return next();
+  }
+
+  // Otherwise check standard Bearer JWT Token
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(401).json({ error: 'Chưa đăng nhập hoặc thiếu token xác thực (Missing Bearer Token)' });
+    return res.status(401).json({
+      error: 'Chưa đăng nhập hoặc thiếu token xác thực. Cần cung cấp Header Authorization: Bearer <TOKEN> hoặc X-API-Key: rag_sk_live_...',
+    });
   }
 
   const token = authHeader.split(' ')[1];
@@ -170,7 +250,7 @@ export function authMiddleware(req: AuthenticatedRequest, res: Response, next: N
     req.user = decoded;
     next();
   } catch (err) {
-    return res.status(401).json({ error: 'Token không hợp lệ hoặc đã hết hạn' });
+    return res.status(401).json({ error: 'Token không hợp lệ hoặc đã hết hạn.' });
   }
 }
 

@@ -12,10 +12,11 @@ import {
   Sparkles,
   Key,
   Layers,
+  Bot,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
-export type ActiveTab = 'chat' | 'search' | 'knowledge' | 'visualizer' | 'settings';
+export type ActiveTab = 'chat' | 'search' | 'knowledge' | 'api_hub' | 'visualizer' | 'settings';
 
 interface HeaderProps {
   activeTab: ActiveTab;
@@ -44,8 +45,13 @@ export const Header: React.FC<HeaderProps> = ({
       icon: <BookOpen className="w-3.5 h-3.5" />,
       badge: `${documentCount} docs`,
     },
+    {
+      id: 'api_hub',
+      label: 'Cổng API (Zabbix/Bot)',
+      icon: <Bot className="w-3.5 h-3.5" />,
+    },
     { id: 'visualizer', label: 'Không gian 2D Vector', icon: <Orbit className="w-3.5 h-3.5" /> },
-    { id: 'settings', label: 'Cấu hình & API Key', icon: <Settings className="w-3.5 h-3.5" /> },
+    { id: 'settings', label: 'Cấu hình & Gemini Key', icon: <Settings className="w-3.5 h-3.5" /> },
   ];
 
   const userInitials = user?.name
